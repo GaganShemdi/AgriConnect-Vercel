@@ -143,14 +143,21 @@ export async function dailyTip(ctx: FarmerContext): Promise<string> {
   const prompt = `Give me ONE short, practical farming tip for today in 2 to 3 sentences. Make it specific to my crops, my state, the current season, and today's weather. Start the tip with a single relevant emoji. Do not greet me, do not list multiple tips, do not ask follow-up questions.`;
   try {
     const result = await model.generateContent(prompt);
-    const t = (result.response.text() || '').trim();
-    if (!t) {
+    const raw = (result.response.text() || '').trim();
+    console.log('[dailyTip] raw gemini response:', JSON.stringify(raw));
+
+    // reject obvious junk: empty, just whitespace, or just an emoji with no real words
+    const wordCount = raw.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim().split(/\s+/).filter(Boolean).length;
+    if (!raw || wordCount < 5) {
+      console.warn('[dailyTip] response too short, using fallback. words=', wordCount);
+      // dont cache the bad reply -- next render gets a fresh shot
       return 'Check your crops every morning, water early, and watch for pests on new leaves.';
     }
-    tipCache.set(key, { tip: t, ts: Date.now() });
-    return t;
+
+    tipCache.set(key, { tip: raw, ts: Date.now() });
+    return raw;
   } catch (err) {
-    console.error('Gemini dailyTip error', err);
+    console.error('[dailyTip] gemini error', err);
     return 'Check your crops every morning, water early, and watch for pests on new leaves.';
   }
 }

@@ -34,9 +34,15 @@ export default function Dashboard() {
     setPricesLoaded(false);
 
     (async () => {
+      // 1. user's crop in their state
       let p = await fetchMandiPrices({ commodity: crop, state: profile?.state, limit: 25 });
+      // 2. user's crop, anywhere in India
       if (p.length === 0) {
         p = await fetchMandiPrices({ commodity: crop, limit: 25 });
+      }
+      // 3. last resort -- something that always has data so home isnt blank
+      if (p.length === 0) {
+        p = await fetchMandiPrices({ commodity: 'Tomato', limit: 25 });
       }
       if (cancelled) return;
       const sorted = [...p].sort((a, b) => b.modal_price - a.modal_price).slice(0, 5);
@@ -137,8 +143,8 @@ export default function Dashboard() {
                 {tipLoading ? (
                   <p className="text-sm opacity-90">Brewing today's tip…</p>
                 ) : (
-                  <div className="text-sm leading-snug">
-                    <Markdown text={tip} />
+                  <div className="text-sm leading-snug text-white">
+                    <Markdown text={tip && tip.trim().length > 5 ? tip : 'Check your crops every morning, water early, and watch for pests on new leaves.'} />
                   </div>
                 )}
                 <div className="text-[11px] opacity-80 mt-2">Tap to ask anything →</div>
