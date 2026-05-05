@@ -5,13 +5,23 @@ import { Bell, Bot, CloudSun, Sparkles, TrendingUp } from 'lucide-react';
 import MobileLayout from '../components/layout/MobileLayout';
 import Card from '../components/ui/Card';
 import { useAuthStore } from '../store/authStore';
-import { fetchMandiPrices } from '../services/mandiService';
+import { fetchMandiPrices, getMockMandiPrices } from '../services/mandiService';
 import { fetchWeather } from '../services/weatherService';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { dailyTip } from '../services/geminiService';
 import { buildAlerts } from '../utils/alerts';
 import Markdown from '../utils/markdown';
+import { pickTipForToday } from '../data/tips';
 import type { MandiPrice, WeatherResponse, Language } from '../types';
+
+
+// helper -- race a promise against a timeout, resolve null if it loses
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }).catch(() => { clearTimeout(t); resolve(null); });
+  });
+}
 
 
 export default function Dashboard() {
@@ -19,35 +29,49 @@ export default function Dashboard() {
   const { profile, language } = useAuthStore();
   const { lat, lng } = useGeolocation();
 
-  const [prices, setPrices] = useState<MandiPrice[]>([]);
-  const [pricesLoaded, setPricesLoaded] = useState(false);
+  // INSTANT prices -- start with mock so the home screen never sits empty
+  const initialCrop = profile?.primary_crops?.[0] ?? 'Tomato';
+  const [prices, setPrices] = useState<MandiPrice[]>(() =>
+    getMockMandiPrices(initialCrop).slice(0, 5)
+  );
+
   const [weather, setWeather] = useState<WeatherResponse | null>(null);
-  const [tip, setTip] = useState<string>('');
-  const [tipLoading, setTipLoading] = useState(true);
+
+  // INSTANT tip -- pick a deterministic one based on today + farmer's profile
+  const [tip, setTip] = useState<string>(() =>
+    pickTipForToday(`${profile?.name ?? ''}|${(profile?.primary_crops || []).join(',')}`)
+  );
 
 
-  // mandi prices for the user's main crop.
-  // try state-filtered first, fall back to all-india if empty
+  // upgrade prices in background (max 4s wait, otherwise keep mocks)
   useEffect(() => {
     let cancelled = false;
     const crop = profile?.primary_crops?.[0] ?? 'Tomato';
-    setPricesLoaded(false);
 
     (async () => {
-      // 1. user's crop in their state
-      let p = await fetchMandiPrices({ commodity: crop, state: profile?.state, limit: 25 });
-      // 2. user's crop, anywhere in India
-      if (p.length === 0) {
-        p = await fetchMandiPrices({ commodity: crop, limit: 25 });
+      // try state-filtered first (4s timeout)
+      let p = await withTimeout(
+        fetchMandiPrices({ commodity: crop, state: profile?.state, limit: 25 }),
+        4000
+      );
+      if (!cancelled && p && p.length > 0) {
+        setPrices([...p].sort((a, b) => b.modal_price - a.modal_price).slice(0, 5));
+        return;
       }
-      // 3. last resort -- something that always has data so home isnt blank
-      if (p.length === 0) {
-        p = await fetchMandiPrices({ commodity: 'Tomato', limit: 25 });
+
+      // fallback all-india crop
+      p = await withTimeout(fetchMandiPrices({ commodity: crop, limit: 25 }), 4000);
+      if (!cancelled && p && p.length > 0) {
+        setPrices([...p].sort((a, b) => b.modal_price - a.modal_price).slice(0, 5));
+        return;
       }
-      if (cancelled) return;
-      const sorted = [...p].sort((a, b) => b.modal_price - a.modal_price).slice(0, 5);
-      setPrices(sorted);
-      setPricesLoaded(true);
+
+      // last try: tomato (always has rows)
+      p = await withTimeout(fetchMandiPrices({ commodity: 'Tomato', limit: 25 }), 4000);
+      if (!cancelled && p && p.length > 0) {
+        setPrices([...p].sort((a, b) => b.modal_price - a.modal_price).slice(0, 5));
+      }
+      // if everything timed out / failed, the mock data we set initially stays put
     })();
 
     return () => { cancelled = true; };
@@ -60,23 +84,30 @@ export default function Dashboard() {
   }, [lat, lng]);
 
 
-  // daily AI tip -- depends on profile + weather + language
+  // upgrade tip in background -- max 5s wait, otherwise keep static
   useEffect(() => {
     let cancelled = false;
-    setTipLoading(true);
-    dailyTip({
-      name: profile?.name,
-      state: profile?.state,
-      language: (language ?? 'en') as Language,
-      crops: profile?.primary_crops,
-      weather: weather?.current
-        ? { temp: weather.current.temp, description: weather.current.description }
-        : undefined,
-    }).then((text: string) => {
+
+    (async () => {
+      const ai = await withTimeout(
+        dailyTip({
+          name: profile?.name,
+          state: profile?.state,
+          language: (language ?? 'en') as Language,
+          crops: profile?.primary_crops,
+          weather: weather?.current
+            ? { temp: weather.current.temp, description: weather.current.description }
+            : undefined,
+        }),
+        5000
+      );
       if (cancelled) return;
-      setTip(text);
-      setTipLoading(false);
-    });
+      // only swap in if AI actually returned something meaningful
+      if (ai && ai.trim().length > 20) {
+        setTip(ai);
+      }
+    })();
+
     return () => { cancelled = true; };
   }, [profile, language, weather]);
 
@@ -131,29 +162,33 @@ export default function Dashboard() {
         </Card>
 
 
-        {/* kisanmitra daily tip -- doubles as advisory entry point */}
+        {/* kisanmitra tip card -- inline style so the green can never be purged */}
         <Link to="/advisory">
-          <Card className="bg-primary-forest text-white border-0">
+          <div
+            className="rounded-2xl shadow-card p-4"
+            style={{ backgroundColor: '#1B4332', color: '#ffffff' }}
+          >
             <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 text-[11px] opacity-80 mb-1">
+              <div className="flex-1 min-w-0" style={{ color: '#ffffff' }}>
+                <div className="flex items-center gap-1.5 text-[11px] mb-1" style={{ opacity: 0.85 }}>
                   <Sparkles size={12} />
                   KISANMITRA • TODAY'S TIP
                 </div>
-                {tipLoading ? (
-                  <p className="text-sm opacity-90">Brewing today's tip…</p>
-                ) : (
-                  <div className="text-sm leading-snug text-white">
-                    <Markdown text={tip && tip.trim().length > 5 ? tip : 'Check your crops every morning, water early, and watch for pests on new leaves.'} />
-                  </div>
-                )}
-                <div className="text-[11px] opacity-80 mt-2">Tap to ask anything →</div>
+                <div className="text-sm leading-snug" style={{ color: '#ffffff' }}>
+                  <Markdown text={tip} />
+                </div>
+                <div className="text-[11px] mt-2" style={{ opacity: 0.85 }}>
+                  Tap to ask anything →
+                </div>
               </div>
-              <div className="bg-white/20 rounded-2xl p-2.5 shrink-0">
+              <div
+                className="rounded-2xl p-2.5 shrink-0"
+                style={{ backgroundColor: 'rgba(255,255,255,0.18)' }}
+              >
                 <Bot size={22} />
               </div>
             </div>
-          </Card>
+          </div>
         </Link>
 
 
@@ -168,33 +203,27 @@ export default function Dashboard() {
             </Link>
           </div>
           <Card padding="sm">
-            {!pricesLoaded ? (
-              <div className="text-sm text-gray-500 p-3">{t('common.loading')}</div>
-            ) : prices.length === 0 ? (
-              <div className="text-sm text-gray-500 p-3">No prices today. Check the Mandi tab.</div>
-            ) : (
-              <ul className="divide-y divide-gray-100">
-                {prices.map((p, i) => (
-                  <li
-                    key={`${p.market}-${i}`}
-                    className="py-2.5 px-2 flex justify-between items-center"
-                  >
-                    <div>
-                      <div className="font-medium text-sm">{p.commodity}</div>
-                      <div className="text-xs text-gray-500">
-                        {p.market}, {p.state}
-                      </div>
+            <ul className="divide-y divide-gray-100">
+              {prices.map((p, i) => (
+                <li
+                  key={`${p.market}-${i}`}
+                  className="py-2.5 px-2 flex justify-between items-center"
+                >
+                  <div>
+                    <div className="font-medium text-sm">{p.commodity}</div>
+                    <div className="text-xs text-gray-500">
+                      {p.market}, {p.state}
                     </div>
-                    <div className="text-right">
-                      <div className="text-sm font-semibold text-primary-forest">
-                        ₹{p.modal_price}
-                      </div>
-                      <div className="text-[10px] text-gray-400">/ quintal</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-semibold text-primary-forest">
+                      ₹{p.modal_price}
                     </div>
-                  </li>
-                ))}
-              </ul>
-            )}
+                    <div className="text-[10px] text-gray-400">/ quintal</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </Card>
         </div>
 
