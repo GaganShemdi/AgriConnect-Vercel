@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+/* noto sans handles english + indic scripts */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Noto Sans', 'Noto Sans Devanagari', 'Noto Sans Kannada', 'Noto Sans Telugu',
+    'Noto Sans Tamil', 'Noto Sans Bengali', system-ui, -apple-system, sans-serif;
+  background-color: #d8f3dc;
+  color: #1b4332;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* kill the up/down arrows on number inputs, looked ugly on phone */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* leaflet attribution sits behind the bottom nav otherwise */
+.leaflet-bottom {
+  bottom: 10px !important;
+}

@@ -1,0 +1,102 @@
+{
+  "app": {
+    "name": "AgriConnect",
+    "tagline": "Empowering Every Indian Farmer | Cohort 1"
+  },
+  "nav": {
+    "home": "Home",
+    "mandi": "Mandi",
+    "advisory": "KisanMitra",
+    "weather": "Weather",
+    "profile": "Profile"
+  },
+  "login": {
+    "title": "Welcome to AgriConnect",
+    "subtitle": "Sign in with your mobile number",
+    "phoneLabel": "Mobile Number",
+    "sendOTP": "Send OTP",
+    "otpLabel": "Enter 6-digit OTP",
+    "verify": "Verify & Continue",
+    "resend": "Resend OTP",
+    "resendIn": "Resend in {{sec}}s",
+    "language": "Select your language"
+  },
+  "onboarding": {
+    "title": "Tell us about your farm",
+    "stepLang": "Language",
+    "stepLocation": "Location",
+    "stepCrops": "Your Crops",
+    "name": "Your name",
+    "state": "State",
+    "district": "District",
+    "pickCrops": "Pick the crops you grow",
+    "farmSize": "Farm size (acres, optional)",
+    "continue": "Continue",
+    "finish": "Finish",
+    "back": "Back"
+  },
+  "dashboard": {
+    "hi": "Hello",
+    "todayPrices": "Today's Mandi Prices",
+    "weatherToday": "Today's Weather",
+    "askAI": "Ask KisanMitra",
+    "alerts": "Alerts",
+    "noAlerts": "No new alerts"
+  },
+  "mandi": {
+    "title": "Mandi Prices",
+    "selectCrop": "Select Crop",
+    "pricesAt": "Prices across mandis",
+    "modal": "Modal",
+    "min": "Min",
+    "max": "Max",
+    "trendTitle": "30-day trend",
+    "noData": "No price data available. Try another crop or state."
+  },
+  "advisory": {
+    "title": "KisanMitra AI",
+    "placeholder": "Ask about pests, fertilizer, weather, prices...",
+    "send": "Send",
+    "quick": {
+      "pest": "Pest help",
+      "fertilizer": "Fertilizer advice",
+      "calendar": "Sowing calendar",
+      "disease": "Detect disease"
+    }
+  },
+  "weather": {
+    "title": "Weather",
+    "humidity": "Humidity",
+    "wind": "Wind",
+    "rain": "Rain",
+    "forecast7d": "7-day forecast",
+    "hourly": "Next 24 hours"
+  },
+  "market": {
+    "title": "Market Linkage",
+    "create": "Post a listing",
+    "browse": "Browse listings"
+  },
+  "profile": {
+    "title": "Profile",
+    "logout": "Logout",
+    "language": "Language",
+    "crops": "My Crops",
+    "location": "Location"
+  },
+  "crops": {
+    "leafy": "Leafy Vegetables",
+    "root": "Root Vegetables",
+    "gourds": "Gourds & Cucurbits",
+    "legumes": "Legumes",
+    "fruits": "Fruits",
+    "grains": "Grains & Pulses",
+    "cash": "Cash Crops"
+  },
+  "common": {
+    "loading": "Loading...",
+    "retry": "Retry",
+    "save": "Save",
+    "cancel": "Cancel"
+  }
+}
