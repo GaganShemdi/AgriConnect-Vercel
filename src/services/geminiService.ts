@@ -125,3 +125,32 @@ export async function analyzeCropImage(
     return 'Image analysis failed. Please try again with a clearer photo.';
   }
 }
+
+
+// daily AI tip shown on home -- cached in-memory for 6h per (lang, state, crops, weather)
+// so we dont blow through quota on every re-render
+const tipCache = new Map<string, { tip: string; ts: number }>();
+const TIP_TTL_MS = 6 * 60 * 60 * 1000;
+
+export async function dailyTip(ctx: FarmerContext): Promise<string> {
+  const key = `${ctx.language ?? 'en'}|${ctx.state ?? ''}|${(ctx.crops || []).join(',')}|${
+    ctx.weather?.description ?? ''
+  }`;
+  const cached = tipCache.get(key);
+  if (cached && Date.now() - cached.ts < TIP_TTL_MS) return cached.tip;
+
+  const model = getGeminiModel(buildSystemPrompt(ctx));
+  const prompt = `Give me ONE short, practical farming tip for today in 2 to 3 sentences. Make it specific to my crops, my state, the current season, and today's weather. Start the tip with a single relevant emoji. Do not greet me, do not list multiple tips, do not ask follow-up questions.`;
+  try {
+    const result = await model.generateContent(prompt);
+    const t = (result.response.text() || '').trim();
+    if (!t) {
+      return 'Check your crops every morning, water early, and watch for pests on new leaves.';
+    }
+    tipCache.set(key, { tip: t, ts: Date.now() });
+    return t;
+  } catch (err) {
+    console.error('Gemini dailyTip error', err);
+    return 'Check your crops every morning, water early, and watch for pests on new leaves.';
+  }
+}

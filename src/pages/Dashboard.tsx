@@ -8,26 +8,76 @@ import { useAuthStore } from '../store/authStore';
 import { fetchMandiPrices } from '../services/mandiService';
 import { fetchWeather } from '../services/weatherService';
 import { useGeolocation } from '../hooks/useGeolocation';
-import type { MandiPrice, WeatherResponse } from '../types';
+import { dailyTip } from '../services/geminiService';
+import { buildAlerts } from '../utils/alerts';
+import Markdown from '../utils/markdown';
+import type { MandiPrice, WeatherResponse, Language } from '../types';
+
 
 export default function Dashboard() {
   const { t } = useTranslation();
-  const { profile } = useAuthStore();
+  const { profile, language } = useAuthStore();
   const { lat, lng } = useGeolocation();
-  const [prices, setPrices] = useState<MandiPrice[]>([]);
-  const [weather, setWeather] = useState<WeatherResponse | null>(null);
 
+  const [prices, setPrices] = useState<MandiPrice[]>([]);
+  const [pricesLoaded, setPricesLoaded] = useState(false);
+  const [weather, setWeather] = useState<WeatherResponse | null>(null);
+  const [tip, setTip] = useState<string>('');
+  const [tipLoading, setTipLoading] = useState(true);
+
+
+  // mandi prices for the user's main crop.
+  // try state-filtered first, fall back to all-india if empty
   useEffect(() => {
-  
+    let cancelled = false;
     const crop = profile?.primary_crops?.[0] ?? 'Tomato';
-    fetchMandiPrices({ commodity: crop, state: profile?.state, limit: 5 }).then((p) =>
-      setPrices(p.slice(0, 5))
-    );
+    setPricesLoaded(false);
+
+    (async () => {
+      let p = await fetchMandiPrices({ commodity: crop, state: profile?.state, limit: 25 });
+      if (p.length === 0) {
+        p = await fetchMandiPrices({ commodity: crop, limit: 25 });
+      }
+      if (cancelled) return;
+      const sorted = [...p].sort((a, b) => b.modal_price - a.modal_price).slice(0, 5);
+      setPrices(sorted);
+      setPricesLoaded(true);
+    })();
+
+    return () => { cancelled = true; };
   }, [profile]);
 
+
+  // weather
   useEffect(() => {
     if (lat != null && lng != null) fetchWeather(lat, lng).then(setWeather);
   }, [lat, lng]);
+
+
+  // daily AI tip -- depends on profile + weather + language
+  useEffect(() => {
+    let cancelled = false;
+    setTipLoading(true);
+    dailyTip({
+      name: profile?.name,
+      state: profile?.state,
+      language: (language ?? 'en') as Language,
+      crops: profile?.primary_crops,
+      weather: weather?.current
+        ? { temp: weather.current.temp, description: weather.current.description }
+        : undefined,
+    }).then((text: string) => {
+      if (cancelled) return;
+      setTip(text);
+      setTipLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [profile, language, weather]);
+
+
+  // farm-relevant alerts from forecast + crops
+  const alerts = buildAlerts(weather, profile?.primary_crops || []);
+
 
   return (
     <MobileLayout>
@@ -45,6 +95,8 @@ export default function Dashboard() {
       </header>
 
       <div className="px-4 -mt-5 space-y-4">
+
+        {/* weather */}
         <Card>
           <div className="flex items-center justify-between">
             <div>
@@ -72,23 +124,34 @@ export default function Dashboard() {
           </Link>
         </Card>
 
+
+        {/* kisanmitra daily tip -- doubles as advisory entry point */}
         <Link to="/advisory">
           <Card className="bg-primary-forest text-white border-0">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs opacity-80">AI</div>
-                <div className="text-lg font-semibold">{t('dashboard.askAI')}</div>
-                <p className="text-xs opacity-80 mt-1">
-                  Pest, fertilizer, weather advice in your language
-                </p>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 text-[11px] opacity-80 mb-1">
+                  <Sparkles size={12} />
+                  KISANMITRA • TODAY'S TIP
+                </div>
+                {tipLoading ? (
+                  <p className="text-sm opacity-90">Brewing today's tip…</p>
+                ) : (
+                  <div className="text-sm leading-snug">
+                    <Markdown text={tip} />
+                  </div>
+                )}
+                <div className="text-[11px] opacity-80 mt-2">Tap to ask anything →</div>
               </div>
-              <div className="bg-white/20 rounded-2xl p-3">
-                <Bot size={32} />
+              <div className="bg-white/20 rounded-2xl p-2.5 shrink-0">
+                <Bot size={22} />
               </div>
             </div>
           </Card>
         </Link>
 
+
+        {/* todays mandi prices */}
         <div>
           <div className="flex items-center justify-between mb-2 px-1">
             <h2 className="text-sm font-semibold text-primary-forest flex items-center gap-1">
@@ -99,8 +162,10 @@ export default function Dashboard() {
             </Link>
           </div>
           <Card padding="sm">
-            {prices.length === 0 ? (
+            {!pricesLoaded ? (
               <div className="text-sm text-gray-500 p-3">{t('common.loading')}</div>
+            ) : prices.length === 0 ? (
+              <div className="text-sm text-gray-500 p-3">No prices today. Check the Mandi tab.</div>
             ) : (
               <ul className="divide-y divide-gray-100">
                 {prices.map((p, i) => (
@@ -127,13 +192,40 @@ export default function Dashboard() {
           </Card>
         </div>
 
+
+        {/* alerts */}
         <Card>
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-2">
             <Sparkles size={16} className="text-harvest" />
             <h2 className="text-sm font-semibold">{t('dashboard.alerts')}</h2>
           </div>
-          <p className="text-xs text-gray-500">{t('dashboard.noAlerts')}</p>
+          <ul className="space-y-2">
+            {alerts.map((a) => {
+              const bg =
+                a.severity === 'danger'
+                  ? 'bg-red-50 border-red-200'
+                  : a.severity === 'warning'
+                  ? 'bg-amber-50 border-amber-200'
+                  : 'bg-primary-pale border-primary-mint';
+              const titleColor =
+                a.severity === 'danger'
+                  ? 'text-red-700'
+                  : a.severity === 'warning'
+                  ? 'text-amber-800'
+                  : 'text-primary-forest';
+              const icon = a.severity === 'danger' ? '🔥' : a.severity === 'warning' ? '🌧️' : '✅';
+              return (
+                <li key={a.id} className={`rounded-xl border ${bg} p-2.5`}>
+                  <div className={`text-xs font-semibold ${titleColor}`}>
+                    {icon} {a.title}
+                  </div>
+                  <div className="text-xs text-gray-700 mt-0.5">{a.message}</div>
+                </li>
+              );
+            })}
+          </ul>
         </Card>
+
       </div>
     </MobileLayout>
   );
