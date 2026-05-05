@@ -5,7 +5,7 @@ import { Bell, Bot, CloudSun, Sparkles, TrendingUp } from 'lucide-react';
 import MobileLayout from '../components/layout/MobileLayout';
 import Card from '../components/ui/Card';
 import { useAuthStore } from '../store/authStore';
-import { fetchMandiPrices, getMockMandiPrices } from '../services/mandiService';
+import { fetchMandiPrices } from '../services/mandiService';
 import { fetchWeather } from '../services/weatherService';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { dailyTip } from '../services/geminiService';
@@ -29,11 +29,9 @@ export default function Dashboard() {
   const { profile, language } = useAuthStore();
   const { lat, lng } = useGeolocation();
 
-  // INSTANT prices -- start with mock so the home screen never sits empty
-  const initialCrop = profile?.primary_crops?.[0] ?? 'Tomato';
-  const [prices, setPrices] = useState<MandiPrice[]>(() =>
-    getMockMandiPrices(initialCrop).slice(0, 5)
-  );
+  // start empty -- only show real same-day prices from data.gov.in, no mocks
+  const [prices, setPrices] = useState<MandiPrice[]>([]);
+  const [pricesLoading, setPricesLoading] = useState(true);
 
   const [weather, setWeather] = useState<WeatherResponse | null>(null);
 
@@ -43,35 +41,39 @@ export default function Dashboard() {
   );
 
 
-  // upgrade prices in background (max 4s wait, otherwise keep mocks)
+  // fetch real same-day prices from data.gov.in (same call the Mandi tab uses).
+  // pull all-india for the user's primary crop, fall back to Tomato if 0 rows.
+  // no mock data -- the list shows actual market prices or a loading state.
   useEffect(() => {
     let cancelled = false;
     const crop = profile?.primary_crops?.[0] ?? 'Tomato';
+    setPricesLoading(true);
+
+    const dedupeAndSort = (rows: MandiPrice[]) => {
+      const seen = new Set<string>();
+      return rows
+        .filter((r) => {
+          const k = `${r.market}|${r.state}`;
+          if (seen.has(k) || r.modal_price <= 0) return false;
+          seen.add(k);
+          return true;
+        })
+        .sort((a, b) => b.modal_price - a.modal_price)
+        .slice(0, 10);
+    };
 
     (async () => {
-      // try state-filtered first (4s timeout)
-      let p = await withTimeout(
-        fetchMandiPrices({ commodity: crop, state: profile?.state, limit: 25 }),
-        4000
-      );
-      if (!cancelled && p && p.length > 0) {
-        setPrices([...p].sort((a, b) => b.modal_price - a.modal_price).slice(0, 5));
-        return;
+      // primary crop, all India (matches Mandi-tab default)
+      let p = await fetchMandiPrices({ commodity: crop, limit: 200 }).catch(() => [] as MandiPrice[]);
+
+      // if user's crop returns nothing, fall back to Tomato so the card always shows real data
+      if (!cancelled && p.length === 0) {
+        p = await fetchMandiPrices({ commodity: 'Tomato', limit: 200 }).catch(() => [] as MandiPrice[]);
       }
 
-      // fallback all-india crop
-      p = await withTimeout(fetchMandiPrices({ commodity: crop, limit: 25 }), 4000);
-      if (!cancelled && p && p.length > 0) {
-        setPrices([...p].sort((a, b) => b.modal_price - a.modal_price).slice(0, 5));
-        return;
-      }
-
-      // last try: tomato (always has rows)
-      p = await withTimeout(fetchMandiPrices({ commodity: 'Tomato', limit: 25 }), 4000);
-      if (!cancelled && p && p.length > 0) {
-        setPrices([...p].sort((a, b) => b.modal_price - a.modal_price).slice(0, 5));
-      }
-      // if everything timed out / failed, the mock data we set initially stays put
+      if (cancelled) return;
+      setPrices(dedupeAndSort(p));
+      setPricesLoading(false);
     })();
 
     return () => { cancelled = true; };
@@ -203,27 +205,43 @@ export default function Dashboard() {
             </Link>
           </div>
           <Card padding="sm">
-            <ul className="divide-y divide-gray-100">
-              {prices.map((p, i) => (
-                <li
-                  key={`${p.market}-${i}`}
-                  className="py-2.5 px-2 flex justify-between items-center"
-                >
-                  <div>
-                    <div className="font-medium text-sm">{p.commodity}</div>
-                    <div className="text-xs text-gray-500">
-                      {p.market}, {p.state}
+            {pricesLoading ? (
+              <ul className="divide-y divide-gray-100">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <li key={i} className="py-2.5 px-2 flex justify-between items-center animate-pulse">
+                    <div className="flex-1">
+                      <div className="h-3 w-24 bg-gray-200 rounded mb-1.5" />
+                      <div className="h-2.5 w-36 bg-gray-100 rounded" />
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-semibold text-primary-forest">
-                      ₹{p.modal_price}
+                    <div className="h-4 w-14 bg-gray-200 rounded" />
+                  </li>
+                ))}
+              </ul>
+            ) : prices.length === 0 ? (
+              <div className="text-sm text-gray-500 p-3">No mandi prices reported today.</div>
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {prices.map((p, i) => (
+                  <li
+                    key={`${p.market}-${i}`}
+                    className="py-2.5 px-2 flex justify-between items-center"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{p.market}</div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {p.commodity} • {p.state}
+                      </div>
                     </div>
-                    <div className="text-[10px] text-gray-400">/ quintal</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                    <div className="text-right shrink-0 pl-2">
+                      <div className="text-sm font-semibold text-primary-forest">
+                        ₹{p.modal_price}
+                      </div>
+                      <div className="text-[10px] text-gray-400">/ quintal</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </div>
 
