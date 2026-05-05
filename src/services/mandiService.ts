@@ -2,7 +2,7 @@
 // into something the UI can show on the map / list.
 
 import axios from 'axios';
-import { MANDI_COORDINATES } from '../data/crops';
+import { MANDI_COORDINATES, STATE_CENTERS } from '../data/crops';
 import type { MandiPrice, MandiQueryParams } from '../types';
 
 const BASE_URL = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070';
@@ -38,8 +38,22 @@ export async function fetchMandiPrices(params: MandiQueryParams = {}): Promise<M
 
   try {
     const { data } = await axios.get<RawMandiResponse>(BASE_URL, { params: queryParams });
-    return (data.records || []).map((r) => {
-      const coords = MANDI_COORDINATES[r.market];
+    return (data.records || []).map((r, i) => {
+      // try the exact mandi coords first, otherwise drop a pin near the state
+      // center with a tiny jitter so multiple mandis dont stack on top of each other
+      const exact = MANDI_COORDINATES[r.market];
+      let lat: number | undefined = exact?.lat;
+      let lng: number | undefined = exact?.lng;
+      if (lat == null || lng == null) {
+        const c = STATE_CENTERS[r.state];
+        if (c) {
+          const angle = (i * 47) % 360;
+          const radius = 0.35 + (i % 5) * 0.15;
+          const rad = (angle * Math.PI) / 180;
+          lat = c.lat + Math.sin(rad) * radius;
+          lng = c.lng + Math.cos(rad) * radius;
+        }
+      }
       return {
         commodity: r.commodity,
         market: r.market,
@@ -49,8 +63,8 @@ export async function fetchMandiPrices(params: MandiQueryParams = {}): Promise<M
         max_price: Number(r.max_price) || 0,
         modal_price: Number(r.modal_price) || 0,
         arrival_date: r.arrival_date,
-        lat: coords?.lat,
-        lng: coords?.lng,
+        lat,
+        lng,
       };
     });
   } catch (err) {

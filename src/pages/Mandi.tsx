@@ -28,7 +28,7 @@ export default function Mandi() {
   useEffect(() => {
     setLoading(true);
     fetchMandiPrices({ commodity: selectedCrop, state: stateFilter || undefined, limit: 200 })
-      .then((p) => setPrices(p.filter((x) => x.lat && x.lng)))
+      .then((p) => setPrices(p))
       .finally(() => setLoading(false));
   }, [selectedCrop, stateFilter]);
 
@@ -104,7 +104,7 @@ export default function Mandi() {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 url={tileUrl}
               />
-              {prices.map((p, i) => {
+              {prices.filter((p) => p.lat != null && p.lng != null).map((p, i) => {
                 const weight = national ? (p.modal_price - national) / national : 0;
                 const color = weight > 0.05 ? '#2D6A4F' : weight < -0.05 ? '#E63946' : '#F4A261';
                 return (
@@ -174,7 +174,7 @@ export default function Mandi() {
             <div className="text-sm text-gray-500 p-3">{t('mandi.noData')}</div>
           ) : (
             <ul className="divide-y divide-gray-100 max-h-64 overflow-y-auto">
-              {prices.map((p, i) => (
+              {[...prices].sort((a, b) => b.modal_price - a.modal_price).map((p, i) => (
                 <li
                   key={`${p.market}-${i}`}
                   className="py-2 px-2 flex justify-between items-center text-sm"
